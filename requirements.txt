@@ -1,0 +1,5 @@
+requests
+spotipy
+qrcode[pil]
+Pillow
+pyOpenSSL
