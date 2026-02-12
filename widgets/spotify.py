@@ -19,7 +19,7 @@ SPOTIPY_CLIENT_SECRET = '72ca31c9c22e420eacca1679284d753b'
 
 
 class SpotifyWidget:
-    def _init_(self, root, row, col, local_ip):
+    def __init__(self, root, row, col, local_ip):
         self.root = root
         self.local_ip = local_ip
         self.redirect_uri = f'https://{local_ip}:8888/callback'
