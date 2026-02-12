@@ -1,5 +1,6 @@
-requests
-spotipy
-qrcode[pil]
-Pillow
+flask
+flask-cors
 pyOpenSSL
+spotipy
+Pillow
+qrcode
