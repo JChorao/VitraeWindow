@@ -1,6 +1,5 @@
 # VitraeWindow
-VitraeWindow 🖼️
-O VitraeWindow (ou VitraeView) é um dashboard interativo desenvolvido em Python utilizando a biblioteca tkinter. O projeto foi concebido para funcionar como uma central de informações visual, ideal para ecrãs fixos ou dispositivos como o Raspberry Pi.
+O VitraeWindow, faz parte do projeto VitraeView, é um dashboard interativo desenvolvido em Python utilizando a biblioteca tkinter. O projeto foi concebido para funcionar como uma central de informações visual, ideal para ecrãs fixos ou dispositivos como o Raspberry Pi.
 
 🚀 Funcionalidades Atuais
 O dashboard organiza-se numa grelha 3x3 com os seguintes widgets:
