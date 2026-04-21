@@ -1,0 +1,16 @@
+# Web Server & API
+Flask
+flask-cors
+
+# Segurança e Criptografia
+pyOpenSSL
+
+# Integração Spotify
+spotipy
+
+# Processamento de Imagem e QR Codes
+Pillow
+qrcode[pil]
+
+# Interface Gráfica Moderna (Opcional mas recomendado para o teu projeto)
+customtkinter
