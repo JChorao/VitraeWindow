@@ -17,3 +17,4 @@ pyOpenSSL
 spotipy
 Pillow
 qrcode[pil]
+pyserial
