@@ -72,6 +72,7 @@ class VitraeDashboard:
         print("🔄 A Iniciar Sistema VitraeView...")
         self.setup_firebase()
         self.validate_device()
+        self.report_estado_to_firebase(True)
         self.report_resolution_to_firebase()
 
         self.start_layout_listener()
@@ -110,12 +111,14 @@ class VitraeDashboard:
             
             if self.current_layout_data:
                 self.apply_dynamic_layout(self.current_layout_data)
+            self.report_estado_to_firebase(True)
         else:
             # --- ELIMINAR WIDGETS ---
             self.tela_ativa = False
             self.root.configure(fg_color="#FFFFFF") # Fundo preto absoluto para simular ecrã desligado
             print("🖥️ [Interface] Divisão vazia! A eliminar todos os widgets...")
             self.limpar_todos_widgets()
+            self.report_estado_to_firebase(False)
 
     def limpar_todos_widgets(self):
         """Elimina fisicamente todos os widgets da memória"""
@@ -424,7 +427,25 @@ class VitraeDashboard:
         print("\nA encerrar o sistema e a limpar conexões...")
         if hasattr(self, 'ser_radar') and self.ser_radar:
             self.ser_radar.close()
+        # Escrita SÍNCRONA antes de fechar, para garantir que chega à Firestore
+        try:
+            if self.db and self.device_id:
+                self.db.collection('windows').document(self.device_id).set(
+                    {'estado': 'Inativa'}, merge=True)
+        except Exception:
+            pass
         self.root.destroy()
+
+    def report_estado_to_firebase(self, ativo):
+    #Atualiza o estado da janela na Firestore (Ativa/Inativa)
+        if self.db and self.device_id:
+            def _enviar():
+                try:
+                    self.db.collection('windows').document(self.device_id).set(
+                        {'estado': 'Ativa' if ativo else 'Inativa'}, merge=True)
+                except Exception:
+                    pass
+            threading.Thread(target=_enviar, daemon=True).start()
 
 if __name__ == "__main__":
     root = ctk.CTk()
