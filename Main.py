@@ -301,6 +301,29 @@ class VitraeDashboard:
             lbl_main = ctk.CTkLabel(frame, text="✅ GÁS: OK", font=("Roboto", 18, "bold"), text_color="white")
             lbl_main.place(relx=0.5, rely=0.5, anchor="center")
             widget_info.update({'frame': frame})
+
+        # === WIDGET CALENDÁRIO (FIXO / SEM SCROLL) ===
+        elif w_type == 'calendar':
+            # Frame de proporção fixa para a semana corrente
+            frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=310, height=250)
+            
+            # Título do painel
+            lbl_title = ctk.CTkLabel(frame, text="📅 Esta Semana", font=("Roboto", 18, "bold"), text_color="white")
+            lbl_title.place(relx=0.5, rely=0.12, anchor="center")
+
+            # Contentor estático para albergar os elementos das tarefas
+            events_frame = ctk.CTkFrame(frame, fg_color="transparent", width=280, height=180)
+            events_frame.place(relx=0.5, rely=0.58, anchor="center")
+
+            widget_info.update({
+                'frame': frame, 
+                'events_frame': events_frame,
+                'events': w_data.get('events', [])
+            })
+            
+            self._render_calendar_events(events_frame, w_data.get('events', []))
+        # ============================================
+
         else:
             return
 
@@ -326,6 +349,49 @@ class VitraeDashboard:
                 w['loc'] = new_loc
                 w['lbl_main'].configure(text="--°C")
                 self.fetch_weather_thread(wid)
+                
+        # === ATUALIZADOR DO CALENDÁRIO ===
+        elif w_type == 'calendar':
+            new_events = w_data.get('events', [])
+            if w.get('events') != new_events:
+                w['events'] = new_events
+                self._render_calendar_events(w['events_frame'], new_events)
+        # =================================
+
+    # === LÓGICA DE RENDERIZAÇÃO DAS TAREFAS ===
+    def _render_calendar_events(self, parent_frame, events_list):
+        """Limpa o contentor e desenha a lista de tarefas sem estourar o layout"""
+        # Elimina os elementos visuais antigos do ciclo anterior
+        for widget in parent_frame.winfo_children():
+            widget.destroy()
+
+        # Caso a lista esteja vazia na Firestore
+        if not events_list:
+            lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", 13), text_color="gray")
+            lbl_empty.pack(expand=True, pady=40)
+            return
+
+        # Limitador rígido: mostra no máximo 4 tarefas para caber perfeitamente no espaço do ecrã
+        max_items = 4
+        for event in events_list[:max_items]:
+            hora = event.get('time', '--:--')
+            dia = event.get('day', '')  # Ex: "Seg" ou "11/06"
+            titulo = event.get('title', 'Sem Título')
+
+            # Formata a string de tempo (junta dia e hora se ambos existirem)
+            string_tempo = f"{dia} {hora}".strip() if dia else hora
+
+            # Linha da tarefa
+            event_row = ctk.CTkFrame(parent_frame, fg_color="#2b2b2b", corner_radius=5)
+            event_row.pack(fill="x", pady=4, padx=2)
+
+            # Badge de Tempo (Azul)
+            lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", 11, "bold"), text_color="#3498db")
+            lbl_time.pack(side="left", padx=8, pady=5)
+
+            # Descrição da tarefa
+            lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", 12), text_color="white", anchor="w")
+            lbl_title.pack(side="left", fill="x", expand=True, padx=4, pady=5)
 
     def destroy_widget(self, wid):
         """Anula os agendamentos pendentes e destrói o frame visual"""
