@@ -14,3 +14,7 @@ ENV/
 # Sistema
 .DS_Store
 Thumbs.db
+
+serviceAccountKey.json
+calendar_token.txt
+vitrae_id.txt
