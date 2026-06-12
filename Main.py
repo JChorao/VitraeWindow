@@ -55,6 +55,8 @@ GOOGLE_CLIENT_SECRET = load_client_secret()
 # --- CONFIGURAÇÃO VISUAL ---
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+ctk.set_widget_scaling(1.0) # <-- DESATIVA O ZOOM SECRETO DO WINDOWS
+ctk.set_window_scaling(1.0) # <-- DESATIVA O ZOOM SECRETO DO WINDOWS
 GAS_SENSOR_PIN = 26 
 
 class VitraeDashboard:
@@ -273,50 +275,57 @@ class VitraeDashboard:
         w_type = w_data.get('type')
         x = w_data.get('x', 0.5)
         y = w_data.get('y', 0.5)
+        scale = w_data.get('scale', 1.0) # Lê logo a escala na criação
 
-        widget_info = {'type': w_type, 'update_job': None, 'update_job_calendar': None}
+        widget_info = {'type': w_type, 'update_job': None, 'update_job_calendar': None, 'scale': scale}
 
         if w_type == 'clock':
-            frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=250, height=120)
-            lbl_main = ctk.CTkLabel(frame, text="00:00", font=("Roboto", 40, "bold"), text_color="white")
+            w_w, w_h = 250, 120
+            frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=int(w_w * scale), height=int(w_h * scale))
+            frame.pack_propagate(False) # IMPEDE O WIDGET DE TRANSBORDAR
+            lbl_main = ctk.CTkLabel(frame, text="00:00", font=("Roboto", int(40 * scale), "bold"), text_color="white")
             lbl_main.place(relx=0.5, rely=0.4, anchor="center")
-            lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", 14), text_color="gray")
+            lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", int(14 * scale)), text_color="gray")
             lbl_sub.place(relx=0.5, rely=0.75, anchor="center")
             
             widget_info.update({'frame': frame, 'lbl_main': lbl_main, 'lbl_sub': lbl_sub, 'tz': w_data.get('timezone', 'Local')})
 
         elif w_type == 'weather':
-            frame = ctk.CTkFrame(self.root, fg_color="#2980b9", corner_radius=10, width=200, height=120)
-            lbl_main = ctk.CTkLabel(frame, text="--°C", font=("Roboto", 32, "bold"), text_color="white")
+            w_w, w_h = 200, 120
+            frame = ctk.CTkFrame(self.root, fg_color="#2980b9", corner_radius=10, width=int(w_w * scale), height=int(w_h * scale))
+            frame.pack_propagate(False) # IMPEDE O WIDGET DE TRANSBORDAR
+            lbl_main = ctk.CTkLabel(frame, text="--°C", font=("Roboto", int(32 * scale), "bold"), text_color="white")
             lbl_main.place(relx=0.5, rely=0.4, anchor="center")
-            lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", 14), text_color="#e0e0e0")
+            lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", int(14 * scale)), text_color="#e0e0e0")
             lbl_sub.place(relx=0.5, rely=0.75, anchor="center")
 
             widget_info.update({'frame': frame, 'lbl_main': lbl_main, 'lbl_sub': lbl_sub, 'loc': w_data.get('location', 'Lisboa, PT')})
 
         elif w_type == 'gas':
-            frame = ctk.CTkFrame(self.root, fg_color="#27ae60", corner_radius=10, width=220, height=80)
-            lbl_main = ctk.CTkLabel(frame, text="✅ GÁS: OK", font=("Roboto", 18, "bold"), text_color="white")
+            w_w, w_h = 220, 80
+            frame = ctk.CTkFrame(self.root, fg_color="#27ae60", corner_radius=10, width=int(w_w * scale), height=int(w_h * scale))
+            frame.pack_propagate(False) # IMPEDE O WIDGET DE TRANSBORDAR
+            lbl_main = ctk.CTkLabel(frame, text="✅ GÁS: OK", font=("Roboto", int(18 * scale), "bold"), text_color="white")
             lbl_main.place(relx=0.5, rely=0.5, anchor="center")
-            widget_info.update({'frame': frame})
+            widget_info.update({'frame': frame, 'lbl_main': lbl_main})
 
         elif w_type == 'calendar':
-            # Vai buscar as cores e o modo (ou usa os pré-definidos)
+            w_w, w_h = 310, 250
             bg_color = w_data.get('bg_color', '#1a1a1a')
             title_color = w_data.get('title_color', '#ffffff')
             time_color = w_data.get('time_color', '#3498db')
             view_mode = w_data.get('view_mode', 'Semana')
 
-            # --- NOVO: Mapeamento do Título ---
             titulos_agenda = {"Dia": "Agenda do Dia", "Semana": "Agenda da Semana", "Mês": "Agenda do Mês"}
             texto_titulo = titulos_agenda.get(view_mode, f"Agenda da {view_mode}")
 
-            frame = ctk.CTkFrame(self.root, fg_color=bg_color, corner_radius=10, width=310, height=250)
-            # Aplicamos o novo texto_titulo em vez do ícone
-            lbl_title = ctk.CTkLabel(frame, text=texto_titulo, font=("Roboto", 18, "bold"), text_color=title_color)
+            frame = ctk.CTkFrame(self.root, fg_color=bg_color, corner_radius=10, width=int(w_w * scale), height=int(w_h * scale))
+            frame.pack_propagate(False) # A MAGIA! Impede a caixa cinzenta principal de esticar
+            lbl_title = ctk.CTkLabel(frame, text=texto_titulo, font=("Roboto", int(18 * scale), "bold"), text_color=title_color)
             lbl_title.place(relx=0.5, rely=0.12, anchor="center")
 
-            events_frame = ctk.CTkFrame(frame, fg_color="transparent", width=280, height=180)
+            events_frame = ctk.CTkFrame(frame, fg_color="transparent", width=int(280 * scale), height=int(180 * scale))
+            events_frame.pack_propagate(False) # A MAGIA! Impede o texto longo de empurrar as bordas
             events_frame.place(relx=0.5, rely=0.58, anchor="center")
 
             widget_info.update({
@@ -330,10 +339,26 @@ class VitraeDashboard:
                 'time_color': time_color,
                 'view_mode': view_mode
             })
-            self._render_calendar_events(events_frame, [], title_color, time_color)
+            self._render_calendar_events(events_frame, [], title_color, time_color, scale)
+        else:
+            return
 
         self.active_widgets[wid] = widget_info
-        self.active_widgets[wid]['frame'].place(relx=x, rely=y, anchor="nw")
+        
+        # --- LÊ A LARGURA REAL DA JANELA NESTE EXATO MILISSEGUNDO ---
+        win_w = self.root.winfo_width()
+        win_h = self.root.winfo_height()
+        # Prevenção caso o ecrã ainda não tenha acabado de desenhar
+        if win_w < 100: win_w = self.screen_width
+        if win_h < 100: win_h = self.screen_height
+        
+        max_x = max(0.0, 1.0 - ((w_w * scale) / win_w))
+        max_y = max(0.0, 1.0 - ((w_h * scale) / win_h))
+        
+        final_x = min(max(x, 0.0), max_x)
+        final_y = min(max(y, 0.0), max_y)
+        
+        self.active_widgets[wid]['frame'].place(relx=final_x, rely=final_y, anchor="nw")
 
         if w_type == 'clock':
             self.tick_clock(wid)
@@ -346,8 +371,34 @@ class VitraeDashboard:
         w = self.active_widgets[wid]
         w_type = w['type']
         
-        w['frame'].place(relx=w_data.get('x', 0.5), rely=w_data.get('y', 0.5), anchor="nw")
+        novo_scale = w_data.get('scale', 1.0)
+        old_scale = w.get('scale', 1.0)
+        
+        if w_type == 'clock': w_w, w_h = 250, 120
+        elif w_type == 'weather': w_w, w_h = 200, 120
+        elif w_type == 'gas': w_w, w_h = 220, 80
+        elif w_type == 'calendar': w_w, w_h = 310, 250
+        else: w_w, w_h = 200, 200
 
+        # --- APLICA A ESCALA AOS TAMANHOS DE TODOS OS WIDGETS ---
+        if old_scale != novo_scale:
+            w['scale'] = novo_scale
+            w['frame'].configure(width=int(w_w * novo_scale), height=int(w_h * novo_scale))
+            
+            if w_type == 'clock':
+                w['lbl_main'].configure(font=("Roboto", int(40 * novo_scale), "bold"))
+                w['lbl_sub'].configure(font=("Roboto", int(14 * novo_scale)))
+            elif w_type == 'weather':
+                w['lbl_main'].configure(font=("Roboto", int(32 * novo_scale), "bold"))
+                w['lbl_sub'].configure(font=("Roboto", int(14 * novo_scale)))
+            elif w_type == 'gas':
+                w['lbl_main'].configure(font=("Roboto", int(18 * novo_scale), "bold"))
+            elif w_type == 'calendar':
+                w['events_frame'].configure(width=int(280 * novo_scale), height=int(180 * novo_scale))
+                w['lbl_title'].configure(font=("Roboto", int(18 * novo_scale), "bold"))
+                self._render_calendar_events(w['events_frame'], w.get('events', []), w.get('title_color', '#ffffff'), w.get('time_color', '#3498db'), novo_scale)
+
+        # --- ATUALIZA AS RESTANTES DEFINIÇÕES ---
         if w_type == 'clock':
             w['tz'] = w_data.get('timezone', 'Local')
         elif w_type == 'weather':
@@ -359,11 +410,9 @@ class VitraeDashboard:
                 
         elif w_type == 'calendar':
             if 'google_auth_code' in w_data:
-                # SE RECEBER UM CÓDIGO NOVO DA APP, FORÇA ATUALIZAÇÃO IMEDIATA
                 w['google_auth_code'] = w_data['google_auth_code']
                 self.fetch_calendar_thread(wid)
 
-            # --- APLICA CORES E MODO DE VISTA EM TEMPO REAL ---
             novo_bg = w_data.get('bg_color', '#1a1a1a')
             novo_title = w_data.get('title_color', '#ffffff')
             novo_time = w_data.get('time_color', '#3498db')
@@ -374,19 +423,38 @@ class VitraeDashboard:
                 w['frame'].configure(fg_color=novo_bg)
             
             if w.get('title_color') != novo_title or w.get('time_color') != novo_time or w.get('view_mode') != novo_view:
+                old_view = w.get('view_mode') # Guarda o modo antigo
+                
                 w['title_color'] = novo_title
                 w['time_color'] = novo_time
                 w['view_mode'] = novo_view
                 
-                # --- NOVO: Mapeamento do Título na Atualização ---
                 titulos_agenda = {"Dia": "Agenda do Dia", "Semana": "Agenda da Semana", "Mês": "Agenda do Mês"}
                 texto_titulo = titulos_agenda.get(novo_view, f"Agenda da {novo_view}")
                 
-                # Muda o texto do título e a sua cor
                 w['lbl_title'].configure(text=texto_titulo, text_color=novo_title)
+                self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time, novo_scale)
 
-                # Redesenha a lista para atualizar a cor do texto das tarefas
-                self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time)
+                # --- A MAGIA: Se mudares o filtro na App, ele vai imediatamente à Google buscar os novos dados! ---
+                if old_view != novo_view:
+                    self.fetch_calendar_thread(wid)
+                
+                w['lbl_title'].configure(text=texto_titulo, text_color=novo_title)
+                self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time, novo_scale)
+        
+        # --- POSICIONAMENTO COM BLINDAGEM PERFEITA ---
+        win_w = self.root.winfo_width()
+        win_h = self.root.winfo_height()
+        if win_w < 100: win_w = self.screen_width
+        if win_h < 100: win_h = self.screen_height
+
+        max_x = max(0.0, 1.0 - ((w_w * novo_scale) / win_w))
+        max_y = max(0.0, 1.0 - ((w_h * novo_scale) / win_h))
+        
+        final_x = min(max(w_data.get('x', 0.5), 0.0), max_x)
+        final_y = min(max(w_data.get('y', 0.5), 0.0), max_y)
+        
+        w['frame'].place(relx=final_x, rely=final_y, anchor="nw")
 
     # ==========================================
     # MOTOR AUTÓNOMO DO GOOGLE CALENDAR
@@ -431,18 +499,20 @@ class VitraeDashboard:
             access_token = self._get_access_token(refresh_token)
             if access_token:
                 
-                # --- NOVA LÓGICA DE DATAS (DIA, SEMANA, MÊS) ---
+                # --- NOVA LÓGICA DE DATAS BLINDADA ---
                 view_mode = w.get('view_mode', 'Semana')
                 now = datetime.utcnow()
+                # Força o início a ser às 00:00h de hoje, para apanhar as tarefas matinais e de "Dia todo"
+                hoje_meia_noite = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 
                 if view_mode == 'Dia':
-                    time_max = now + timedelta(days=1)
+                    time_max = hoje_meia_noite + timedelta(days=1)
                 elif view_mode == 'Mês':
-                    time_max = now + timedelta(days=30)
+                    time_max = hoje_meia_noite + timedelta(days=30)
                 else: # Semana (default)
-                    time_max = now + timedelta(days=7)
+                    time_max = hoje_meia_noite + timedelta(days=7)
 
-                now_str = now.isoformat() + 'Z'
+                now_str = hoje_meia_noite.isoformat() + 'Z'
                 time_max_str = time_max.isoformat() + 'Z'
                 
                 url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={time_max_str}&singleEvents=true&orderBy=startTime"
@@ -464,15 +534,15 @@ class VitraeDashboard:
                             hora = "Dia todo"
                         events_list.append({"day": dia, "time": hora, "title": item.get('summary', 'Sem Título')})
 
-                    # OTIMIZAÇÃO: Desenha no ecrã e passa as cores personalizadas!
-                    if events_list != w.get('events'):
-                        w['events'] = events_list
-                        self.root.after(0, lambda: self._render_calendar_events(
-                            w['events_frame'], 
-                            events_list,
-                            w.get('title_color', '#ffffff'), 
-                            w.get('time_color', '#3498db')
-                        ))
+                    # OTIMIZAÇÃO: Força SEMPRE o desenho e passa a escala correta!
+                    w['events'] = events_list
+                    self.root.after(0, lambda: self._render_calendar_events(
+                        w['events_frame'], 
+                        events_list,
+                        w.get('title_color', '#ffffff'), 
+                        w.get('time_color', '#3498db'),
+                        w.get('scale', 1.0)
+                    ))
                 else:
                     print(f"⚠️ Erro API Calendar ({res.status_code}): {res.text}")
             else:
@@ -543,13 +613,18 @@ class VitraeDashboard:
     # ==========================================
     # OUTRAS FUNÇÕES DOS WIDGETS
     # ==========================================
-    def _render_calendar_events(self, parent_frame, events_list, title_color="#ffffff", time_color="#3498db"):
+    def _render_calendar_events(self, parent_frame, events_list, title_color="#ffffff", time_color="#3498db", scale=1.0):
         for widget in parent_frame.winfo_children():
             widget.destroy()
 
+        # Calcula o tamanho da letra com base na escala (int para evitar erros do Tkinter)
+        font_empty = int(13 * scale)
+        font_time = int(11 * scale)
+        font_event = int(12 * scale)
+
         if not events_list:
-            lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", 13), text_color=title_color)
-            lbl_empty.pack(expand=True, pady=40)
+            lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", font_empty), text_color=title_color)
+            lbl_empty.pack(expand=True, pady=int(40 * scale))
             return
 
         max_items = 4
@@ -561,13 +636,13 @@ class VitraeDashboard:
             string_tempo = f"{dia} {hora}".strip() if dia else hora
 
             event_row = ctk.CTkFrame(parent_frame, fg_color="transparent")
-            event_row.pack(fill="x", pady=4, padx=2)
+            event_row.pack(fill="x", pady=int(4 * scale), padx=int(2 * scale))
 
-            lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", 11, "bold"), text_color=time_color)
-            lbl_time.pack(side="left", padx=8, pady=5)
+            lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", font_time, "bold"), text_color=time_color)
+            lbl_time.pack(side="left", padx=int(8 * scale), pady=int(5 * scale))
 
-            lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", 12), text_color=title_color, anchor="w")
-            lbl_title.pack(side="left", fill="x", expand=True, padx=4, pady=5)
+            lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", font_event), text_color=title_color, anchor="w")
+            lbl_title.pack(side="left", fill="x", expand=True, padx=int(4 * scale), pady=int(5 * scale))
 
     def destroy_widget(self, wid):
         w = self.active_widgets.get(wid)
