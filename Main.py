@@ -7,7 +7,7 @@ import sys
 import pytz
 import serial
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- IMPORTAÇÕES FIREBASE ---
 import firebase_admin
@@ -36,6 +36,21 @@ except (ImportError, RuntimeError):
         @staticmethod
         def cleanup(): pass
     GPIO = GPIO_Mock()
+
+# --- CONFIGURAÇÃO GOOGLE CALENDAR ---
+GOOGLE_CLIENT_ID = "555974802803-4na1f4nbj856kmqkfc2hv5808fc17kmk.apps.googleusercontent.com"
+
+# 1. CORREÇÃO DE SEGURANÇA: Ler o Secret de um ficheiro local
+def load_client_secret():
+    try:
+        with open('client_secret.txt', 'r') as f:
+            return f.read().strip()
+    except Exception as e:
+        print("❌ ERRO: Ficheiro 'client_secret.txt' não encontrado!")
+        print("Por favor, crie este ficheiro ao lado do Main.py e cole lá o seu Segredo do Cliente do Google.")
+        sys.exit(1)
+
+GOOGLE_CLIENT_SECRET = load_client_secret()
 
 # --- CONFIGURAÇÃO VISUAL ---
 ctk.set_appearance_mode("light")
@@ -67,7 +82,8 @@ class VitraeDashboard:
         self.radar_buffer = b''
 
         self.active_widgets = {}
-        self.current_layout_data = {} # Guarda os dados do Firebase para recriar os widgets
+        self.current_layout_data = {} 
+        self.layout_watch = None # Referência para o listener
 
         print("🔄 A Iniciar Sistema VitraeView...")
         self.setup_firebase()
@@ -84,7 +100,6 @@ class VitraeDashboard:
 
         self.setup_radar()
 
-        # Atribui a tecla '9' GLOBALMENTE para alternar o ecrã manualmente
         self.root.bind_all('9', lambda event: self.alternar_tela_manual())
 
         self.resize_timer = None
@@ -102,37 +117,29 @@ class VitraeDashboard:
             print(f"⚠️ Aviso: Não foi possível iniciar o Radar (Serial: {e})")
 
     def controlar_widgets(self, estado):
-        """Destrói ou recria os widgets com base na presença"""
         if estado:
-            # --- RECRIAR WIDGETS ---
             self.tela_ativa = True
-            self.root.configure(fg_color=self.bg_color) # Restaura o fundo branco/cor original
+            self.root.configure(fg_color=self.bg_color) 
             print("🖥️ [Interface] Presença detetada! A criar widgets do zero...")
-            
             if self.current_layout_data:
                 self.apply_dynamic_layout(self.current_layout_data)
             self.report_estado_to_firebase(True)
         else:
-            # --- ELIMINAR WIDGETS ---
             self.tela_ativa = False
-            self.root.configure(fg_color="#FFFFFF") # Fundo preto absoluto para simular ecrã desligado
+            self.root.configure(fg_color="#FFFFFF")
             print("🖥️ [Interface] Divisão vazia! A eliminar todos os widgets...")
             self.limpar_todos_widgets()
             self.report_estado_to_firebase(False)
 
     def limpar_todos_widgets(self):
-        """Elimina fisicamente todos os widgets da memória"""
         active_ids = list(self.active_widgets.keys())
         for wid in active_ids:
             self.destroy_widget(wid)
 
     def alternar_tela_manual(self):
-        print("\n⌨️ [Teclado] Botão '9' pressionado! Alternando ecrã...")
-        
         if self.tela_ativa:
             self.controlar_widgets(0)
             self.override_manual = True
-            print("⏳ [Radar] Sensor suspenso. A devolver o controlo em 10 segundos...")
             self.root.after(10000, self.limpar_override) 
         else:
             self.controlar_widgets(1)
@@ -140,7 +147,6 @@ class VitraeDashboard:
             self.root.after(5000, self.limpar_override)
             
     def limpar_override(self):
-        print("🔄 [Radar] Controlo devolvido ao sensor automático.")
         self.override_manual = False
 
     def rotina_presenca_radar(self):
@@ -150,32 +156,25 @@ class VitraeDashboard:
         while self.ser_radar and self.ser_radar.is_open:
             if self.ser_radar.in_waiting > 0:
                 self.radar_buffer += self.ser_radar.read(self.ser_radar.in_waiting)
-                
                 if self.override_manual:
                     self.radar_buffer = b'' 
                     time.sleep(0.5)
                     continue
 
                 idx = self.radar_buffer.find(b'\xaa\xff')
-                
                 if idx != -1:
                     if len(self.radar_buffer) >= idx + 30:
                         frame = self.radar_buffer[idx : idx+30]
                         self.radar_buffer = self.radar_buffer[idx+30 :]
-                        
                         presenca_detectada = False
                         
                         for i in range(3):
                             inicio = 4 + (i * 8)
                             bytes_alvo = frame[inicio : inicio+8]
-                            
                             if len(bytes_alvo) == 8:
                                 y = bytes_alvo[2] + ((bytes_alvo[3] & 0x7F) << 8)
                                 vel = bytes_alvo[4] + ((bytes_alvo[5] & 0x7F) << 8)
-                                if bytes_alvo[5] & 0x80: 
-                                    vel = -vel
-                                
-                                # Filtro Anti-Fantasmas
+                                if bytes_alvo[5] & 0x80: vel = -vel
                                 if 400 < y < 4000 and vel != 0:
                                     presenca_detectada = True
                                     break 
@@ -183,13 +182,10 @@ class VitraeDashboard:
                         if presenca_detectada:
                             ultimo_momento_com_presenca = time.time()
                             if not self.tela_ativa:
-                                # Chama a criação de widgets de forma segura para o Tkinter
                                 self.root.after(0, self.controlar_widgets, 1)
                         else:
                             if self.tela_ativa and (time.time() - ultimo_momento_com_presenca > tempo_limite_vazio):
-                                # Chama a eliminação de widgets
                                 self.root.after(0, self.controlar_widgets, 0)
-            
             time.sleep(0.05)
 
     # ==========================================
@@ -213,7 +209,6 @@ class VitraeDashboard:
             sys.exit(1)
         with open(id_file, "r") as f:
             self.device_id = f.read().strip()
-            print(f"✅ Dispositivo Validado: {self.device_id}")
 
     def report_resolution_to_firebase(self):
         if self.db and self.device_id:
@@ -222,7 +217,7 @@ class VitraeDashboard:
                     'resW': self.screen_width,
                     'resH': self.screen_height
                 }, merge=True)
-            except Exception as e:
+            except Exception:
                 pass
 
     def on_window_resize(self, event):
@@ -238,28 +233,33 @@ class VitraeDashboard:
             self.screen_height = height
             self.report_resolution_to_firebase()
 
+    # 2. CORREÇÃO DE ESTABILIDADE: Listener Blindado com Auto-Restart
     def start_layout_listener(self):
         doc_ref = self.db.collection('windows').document(self.device_id)
         
         def on_snapshot(doc_snapshot, changes, read_time):
-            for doc in doc_snapshot:
-                if doc.exists:
-                    data = doc.to_dict()
-                    self.root.after(0, self.apply_dynamic_layout, data)
+            try:
+                for doc in doc_snapshot:
+                    if doc.exists:
+                        data = doc.to_dict()
+                        self.root.after(0, self.apply_dynamic_layout, data)
+            except Exception as e:
+                print(f"❌ [Listener] Erro no snapshot: {e}. A reiniciar em 2s...")
+                try:
+                    if self.layout_watch:
+                        self.layout_watch.unsubscribe()
+                except Exception:
+                    pass
+                self.root.after(2000, self.start_layout_listener)
 
-        doc_ref.on_snapshot(on_snapshot)
+        self.layout_watch = doc_ref.on_snapshot(on_snapshot)
+        print("👂 Listener de layout ativo.")
 
     def apply_dynamic_layout(self, data):
-        # Guarda sempre a última versão da cloud
         self.current_layout_data = data
-        
-        # Se o ecrã estiver "desligado", não cria nada agora. 
-        # Fica guardado para quando o radar detetar presença.
-        if not self.tela_ativa:
-            return
+        if not self.tela_ativa: return
 
         firebase_widgets = data.get('widgets', {})
-
         active_ids = list(self.active_widgets.keys())
         for wid in active_ids:
             if wid not in firebase_widgets:
@@ -276,7 +276,7 @@ class VitraeDashboard:
         x = w_data.get('x', 0.5)
         y = w_data.get('y', 0.5)
 
-        widget_info = {'type': w_type, 'update_job': None}
+        widget_info = {'type': w_type, 'update_job': None, 'update_job_calendar': None}
 
         if w_type == 'clock':
             frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=250, height=120)
@@ -302,28 +302,21 @@ class VitraeDashboard:
             lbl_main.place(relx=0.5, rely=0.5, anchor="center")
             widget_info.update({'frame': frame})
 
-        # === WIDGET CALENDÁRIO (FIXO / SEM SCROLL) ===
         elif w_type == 'calendar':
-            # Frame de proporção fixa para a semana corrente
             frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=310, height=250)
-            
-            # Título do painel
             lbl_title = ctk.CTkLabel(frame, text="📅 Esta Semana", font=("Roboto", 18, "bold"), text_color="white")
             lbl_title.place(relx=0.5, rely=0.12, anchor="center")
 
-            # Contentor estático para albergar os elementos das tarefas
             events_frame = ctk.CTkFrame(frame, fg_color="transparent", width=280, height=180)
             events_frame.place(relx=0.5, rely=0.58, anchor="center")
 
             widget_info.update({
                 'frame': frame, 
                 'events_frame': events_frame,
-                'events': w_data.get('events', [])
+                'events': [], # Já não lemos da Firebase
+                'google_auth_code': w_data.get('google_auth_code')
             })
-            
-            self._render_calendar_events(events_frame, w_data.get('events', []))
-        # ============================================
-
+            self._render_calendar_events(events_frame, [])
         else:
             return
 
@@ -334,6 +327,8 @@ class VitraeDashboard:
             self.tick_clock(wid)
         elif w_type == 'weather':
             self.fetch_weather_thread(wid)
+        elif w_type == 'calendar':
+            self.fetch_calendar_thread(wid)
 
     def update_dynamic_widget(self, wid, w_data):
         w = self.active_widgets[wid]
@@ -350,55 +345,175 @@ class VitraeDashboard:
                 w['lbl_main'].configure(text="--°C")
                 self.fetch_weather_thread(wid)
                 
-        # === ATUALIZADOR DO CALENDÁRIO ===
         elif w_type == 'calendar':
-            new_events = w_data.get('events', [])
-            if w.get('events') != new_events:
-                w['events'] = new_events
-                self._render_calendar_events(w['events_frame'], new_events)
-        # =================================
+            if 'google_auth_code' in w_data:
+                w['google_auth_code'] = w_data['google_auth_code']
 
-    # === LÓGICA DE RENDERIZAÇÃO DAS TAREFAS ===
+    # ==========================================
+    # MOTOR AUTÓNOMO DO GOOGLE CALENDAR
+    # ==========================================
+    def fetch_calendar_thread(self, wid):
+        if wid not in self.active_widgets: return
+        threading.Thread(target=self._fetch_calendar_logic, args=(wid,), daemon=True).start()
+
+    def _fetch_calendar_logic(self, wid):
+        w = self.active_widgets.get(wid)
+        if not w: return
+
+        refresh_token = self._load_refresh_token()
+
+        if not refresh_token:
+            auth_code = w.get('google_auth_code')
+            if auth_code:
+                print("🔑 Novo código recebido da App! A trocar por Refresh Token...")
+                refresh_token = self._exchange_code_for_token(auth_code)
+                if refresh_token:
+                    self._save_refresh_token(refresh_token)
+                    print("✅ Refresh Token guardado com sucesso no dispositivo!")
+                    # 3. CORREÇÃO DE ESTABILIDADE: Escrita protegida
+                    if self.db:
+                        try:
+                            self.db.collection('windows').document(self.device_id).update({
+                                f'widgets.{wid}.google_auth_code': firestore.DELETE_FIELD
+                            })
+                        except Exception as e:
+                            print(f"⚠️ Erro ao apagar auth_code: {e}")
+                    w.pop('google_auth_code', None)
+                else:
+                    print("❌ Erro ao trocar o código. O utilizador pode ter de repetir a sincronização.")
+            else:
+                self._agendar_proxima_verificacao(wid, w, 10000)
+                return
+
+        # --- SE TEMOS REFRESH TOKEN, BUSCAMOS AS TAREFAS ---
+        if refresh_token:
+            try:
+                access_token = self._get_access_token(refresh_token)
+                if access_token:
+                    now = datetime.utcnow()
+                    next_week = now + timedelta(days=7)
+                    now_str = now.isoformat() + 'Z'
+                    next_week_str = next_week.isoformat() + 'Z'
+                    
+                    url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={next_week_str}&singleEvents=true&orderBy=startTime"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    # 4. CORREÇÃO DE ESTABILIDADE: Timeouts em todos os requests
+                    res = requests.get(url, headers=headers, timeout=10).json()
+
+                    events_list = []
+                    for item in res.get('items', []):
+                        start_str = item['start'].get('dateTime', item['start'].get('date'))
+                        
+                        if 'T' in start_str:
+                            data_part = start_str.split('T')[0].split('-')
+                            hora = start_str.split('T')[1][:5]
+                            dia = f"{data_part[2]}/{data_part[1]}"
+                        else:
+                            data_part = start_str.split('-')
+                            dia = f"{data_part[2]}/{data_part[1]}"
+                            hora = "Dia todo"
+
+                        events_list.append({"day": dia, "time": hora, "title": item.get('summary', 'Sem Título')})
+
+                    # 5. OTIMIZAÇÃO: Apenas guarda em RAM e desenha no ecrã. Já não escreve na Firebase!
+                    if events_list != w.get('events'):
+                        w['events'] = events_list
+                        self.root.after(0, lambda: self._render_calendar_events(w['events_frame'], events_list))
+            except Exception as e:
+                print(f"⚠️ Erro no Google Calendar: {e}")
+
+        # O RELÓGIO DA JANELA: Repete a extração daqui a 1 MINUTO (60000 ms) para testes
+        self._agendar_proxima_verificacao(wid, w, 60000)
+
+    def _agendar_proxima_verificacao(self, wid, w, delay_ms):
+        def _executar():
+            if wid in self.active_widgets:
+                if w.get('update_job_calendar'): 
+                    self.root.after_cancel(w['update_job_calendar'])
+                w['update_job_calendar'] = self.root.after(delay_ms, lambda id=wid: self.fetch_calendar_thread(id))
+        self.root.after(0, _executar)
+
+    def _exchange_code_for_token(self, auth_code):
+        url = "https://oauth2.googleapis.com/token"
+        payload = {
+            'code': auth_code,
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'grant_type': 'authorization_code',
+            'redirect_uri': '' 
+        }
+        try:
+            res = requests.post(url, data=payload, timeout=10).json() # Timeout adicionado
+            return res.get('refresh_token')
+        except:
+            return None
+
+    def _get_access_token(self, refresh_token):
+        url = "https://oauth2.googleapis.com/token"
+        payload = {
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token'
+        }
+        try:
+            res = requests.post(url, data=payload, timeout=10).json() # Timeout adicionado
+            return res.get('access_token')
+        except:
+            return None
+
+    def _save_refresh_token(self, token):
+        try:
+            with open('calendar_token.txt', 'w') as f:
+                f.write(token)
+        except Exception as e:
+            print("⚠️ Erro ao guardar token:", e)
+
+    def _load_refresh_token(self):
+        if os.path.exists('calendar_token.txt'):
+            try:
+                with open('calendar_token.txt', 'r') as f:
+                    return f.read().strip()
+            except:
+                pass
+        return None
+
+    # ==========================================
+    # OUTRAS FUNÇÕES DOS WIDGETS
+    # ==========================================
     def _render_calendar_events(self, parent_frame, events_list):
-        """Limpa o contentor e desenha a lista de tarefas sem estourar o layout"""
-        # Elimina os elementos visuais antigos do ciclo anterior
         for widget in parent_frame.winfo_children():
             widget.destroy()
 
-        # Caso a lista esteja vazia na Firestore
         if not events_list:
             lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", 13), text_color="gray")
             lbl_empty.pack(expand=True, pady=40)
             return
 
-        # Limitador rígido: mostra no máximo 4 tarefas para caber perfeitamente no espaço do ecrã
         max_items = 4
         for event in events_list[:max_items]:
             hora = event.get('time', '--:--')
-            dia = event.get('day', '')  # Ex: "Seg" ou "11/06"
+            dia = event.get('day', '')  
             titulo = event.get('title', 'Sem Título')
 
-            # Formata a string de tempo (junta dia e hora se ambos existirem)
             string_tempo = f"{dia} {hora}".strip() if dia else hora
 
-            # Linha da tarefa
             event_row = ctk.CTkFrame(parent_frame, fg_color="#2b2b2b", corner_radius=5)
             event_row.pack(fill="x", pady=4, padx=2)
 
-            # Badge de Tempo (Azul)
             lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", 11, "bold"), text_color="#3498db")
             lbl_time.pack(side="left", padx=8, pady=5)
 
-            # Descrição da tarefa
             lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", 12), text_color="white", anchor="w")
             lbl_title.pack(side="left", fill="x", expand=True, padx=4, pady=5)
 
     def destroy_widget(self, wid):
-        """Anula os agendamentos pendentes e destrói o frame visual"""
         w = self.active_widgets.get(wid)
         if w:
             if w.get('update_job'):
                 self.root.after_cancel(w['update_job'])
+            if w.get('update_job_calendar'):
+                self.root.after_cancel(w['update_job_calendar'])
             w['frame'].destroy()
             del self.active_widgets[wid]
 
@@ -419,7 +534,6 @@ class VitraeDashboard:
             except Exception as e:
                 now = datetime.now()
                 display_name = "Hora Local"
-                print(f"⚠️ [Relógio] Erro com o fuso '{tz_string}'. A usar hora do SO.")
 
         w['lbl_main'].configure(text=now.strftime("%H:%M"))
         w['lbl_sub'].configure(text=display_name)
@@ -439,14 +553,14 @@ class VitraeDashboard:
         try:
             geo_url = f"https://nominatim.openstreetmap.org/search?q={location}&format=json&limit=1"
             headers = {'User-Agent': 'VitraeView-SmartWindow'}
-            geo_res = requests.get(geo_url, headers=headers, timeout=5).json()
+            geo_res = requests.get(geo_url, headers=headers, timeout=10).json() # Timeout adicionado
             
             if geo_res:
                 lat = geo_res[0]['lat']
                 lon = geo_res[0]['lon']
                 
                 meteo_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-                meteo_res = requests.get(meteo_url, timeout=5).json()
+                meteo_res = requests.get(meteo_url, timeout=10).json() # Timeout adicionado
                 temp = meteo_res['current_weather']['temperature']
                 
                 self.root.after(0, lambda: w['lbl_main'].configure(text=f"{temp}°C"))
@@ -481,7 +595,6 @@ class VitraeDashboard:
         self.alert_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         ctk.CTkLabel(self.alert_frame, text="⚠️ FUGA DE GÁS!", font=("Roboto", 50, "bold"), text_color="white").place(relx=0.5, rely=0.5, anchor="center")
         
-        # Se for detetado gás e a interface estiver apagada, obriga a ligar
         if not self.tela_ativa:
             self.controlar_widgets(1)
 
@@ -493,7 +606,6 @@ class VitraeDashboard:
         print("\nA encerrar o sistema e a limpar conexões...")
         if hasattr(self, 'ser_radar') and self.ser_radar:
             self.ser_radar.close()
-        # Escrita SÍNCRONA antes de fechar, para garantir que chega à Firestore
         try:
             if self.db and self.device_id:
                 self.db.collection('windows').document(self.device_id).set(
@@ -503,7 +615,6 @@ class VitraeDashboard:
         self.root.destroy()
 
     def report_estado_to_firebase(self, ativo):
-    #Atualiza o estado da janela na Firestore (Ativa/Inativa)
         if self.db and self.device_id:
             def _enviar():
                 try:
