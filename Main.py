@@ -301,8 +301,19 @@ class VitraeDashboard:
             widget_info.update({'frame': frame})
 
         elif w_type == 'calendar':
-            frame = ctk.CTkFrame(self.root, fg_color="#1a1a1a", corner_radius=10, width=310, height=250)
-            lbl_title = ctk.CTkLabel(frame, text="📅 Esta Semana", font=("Roboto", 18, "bold"), text_color="white")
+            # Vai buscar as cores e o modo (ou usa os pré-definidos)
+            bg_color = w_data.get('bg_color', '#1a1a1a')
+            title_color = w_data.get('title_color', '#ffffff')
+            time_color = w_data.get('time_color', '#3498db')
+            view_mode = w_data.get('view_mode', 'Semana')
+
+            # --- NOVO: Mapeamento do Título ---
+            titulos_agenda = {"Dia": "Agenda do Dia", "Semana": "Agenda da Semana", "Mês": "Agenda do Mês"}
+            texto_titulo = titulos_agenda.get(view_mode, f"Agenda da {view_mode}")
+
+            frame = ctk.CTkFrame(self.root, fg_color=bg_color, corner_radius=10, width=310, height=250)
+            # Aplicamos o novo texto_titulo em vez do ícone
+            lbl_title = ctk.CTkLabel(frame, text=texto_titulo, font=("Roboto", 18, "bold"), text_color=title_color)
             lbl_title.place(relx=0.5, rely=0.12, anchor="center")
 
             events_frame = ctk.CTkFrame(frame, fg_color="transparent", width=280, height=180)
@@ -311,12 +322,15 @@ class VitraeDashboard:
             widget_info.update({
                 'frame': frame, 
                 'events_frame': events_frame,
+                'lbl_title': lbl_title,  
                 'events': [],
-                'google_auth_code': w_data.get('google_auth_code')
+                'google_auth_code': w_data.get('google_auth_code'),
+                'bg_color': bg_color,
+                'title_color': title_color,
+                'time_color': time_color,
+                'view_mode': view_mode
             })
-            self._render_calendar_events(events_frame, [])
-        else:
-            return
+            self._render_calendar_events(events_frame, [], title_color, time_color)
 
         self.active_widgets[wid] = widget_info
         self.active_widgets[wid]['frame'].place(relx=x, rely=y, anchor="nw")
@@ -348,6 +362,31 @@ class VitraeDashboard:
                 # SE RECEBER UM CÓDIGO NOVO DA APP, FORÇA ATUALIZAÇÃO IMEDIATA
                 w['google_auth_code'] = w_data['google_auth_code']
                 self.fetch_calendar_thread(wid)
+
+            # --- APLICA CORES E MODO DE VISTA EM TEMPO REAL ---
+            novo_bg = w_data.get('bg_color', '#1a1a1a')
+            novo_title = w_data.get('title_color', '#ffffff')
+            novo_time = w_data.get('time_color', '#3498db')
+            novo_view = w_data.get('view_mode', 'Semana')
+
+            if w.get('bg_color') != novo_bg:
+                w['bg_color'] = novo_bg
+                w['frame'].configure(fg_color=novo_bg)
+            
+            if w.get('title_color') != novo_title or w.get('time_color') != novo_time or w.get('view_mode') != novo_view:
+                w['title_color'] = novo_title
+                w['time_color'] = novo_time
+                w['view_mode'] = novo_view
+                
+                # --- NOVO: Mapeamento do Título na Atualização ---
+                titulos_agenda = {"Dia": "Agenda do Dia", "Semana": "Agenda da Semana", "Mês": "Agenda do Mês"}
+                texto_titulo = titulos_agenda.get(novo_view, f"Agenda da {novo_view}")
+                
+                # Muda o texto do título e a sua cor
+                w['lbl_title'].configure(text=texto_titulo, text_color=novo_title)
+
+                # Redesenha a lista para atualizar a cor do texto das tarefas
+                self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time)
 
     # ==========================================
     # MOTOR AUTÓNOMO DO GOOGLE CALENDAR
@@ -391,12 +430,22 @@ class VitraeDashboard:
         try:
             access_token = self._get_access_token(refresh_token)
             if access_token:
-                now = datetime.utcnow()
-                next_week = now + timedelta(days=7)
-                now_str = now.isoformat() + 'Z'
-                next_week_str = next_week.isoformat() + 'Z'
                 
-                url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={next_week_str}&singleEvents=true&orderBy=startTime"
+                # --- NOVA LÓGICA DE DATAS (DIA, SEMANA, MÊS) ---
+                view_mode = w.get('view_mode', 'Semana')
+                now = datetime.utcnow()
+                
+                if view_mode == 'Dia':
+                    time_max = now + timedelta(days=1)
+                elif view_mode == 'Mês':
+                    time_max = now + timedelta(days=30)
+                else: # Semana (default)
+                    time_max = now + timedelta(days=7)
+
+                now_str = now.isoformat() + 'Z'
+                time_max_str = time_max.isoformat() + 'Z'
+                
+                url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={time_max_str}&singleEvents=true&orderBy=startTime"
                 headers = {'Authorization': f'Bearer {access_token}'}
                 res = requests.get(url, headers=headers, timeout=10)
                 
@@ -415,10 +464,15 @@ class VitraeDashboard:
                             hora = "Dia todo"
                         events_list.append({"day": dia, "time": hora, "title": item.get('summary', 'Sem Título')})
 
-                    # OTIMIZAÇÃO: Apenas guarda em RAM e desenha no ecrã.
+                    # OTIMIZAÇÃO: Desenha no ecrã e passa as cores personalizadas!
                     if events_list != w.get('events'):
                         w['events'] = events_list
-                        self.root.after(0, lambda: self._render_calendar_events(w['events_frame'], events_list))
+                        self.root.after(0, lambda: self._render_calendar_events(
+                            w['events_frame'], 
+                            events_list,
+                            w.get('title_color', '#ffffff'), 
+                            w.get('time_color', '#3498db')
+                        ))
                 else:
                     print(f"⚠️ Erro API Calendar ({res.status_code}): {res.text}")
             else:
@@ -489,12 +543,12 @@ class VitraeDashboard:
     # ==========================================
     # OUTRAS FUNÇÕES DOS WIDGETS
     # ==========================================
-    def _render_calendar_events(self, parent_frame, events_list):
+    def _render_calendar_events(self, parent_frame, events_list, title_color="#ffffff", time_color="#3498db"):
         for widget in parent_frame.winfo_children():
             widget.destroy()
 
         if not events_list:
-            lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", 13), text_color="gray")
+            lbl_empty = ctk.CTkLabel(parent_frame, text="Sem tarefas agendadas.", font=("Roboto", 13), text_color=title_color)
             lbl_empty.pack(expand=True, pady=40)
             return
 
@@ -506,13 +560,13 @@ class VitraeDashboard:
 
             string_tempo = f"{dia} {hora}".strip() if dia else hora
 
-            event_row = ctk.CTkFrame(parent_frame, fg_color="#2b2b2b", corner_radius=5)
+            event_row = ctk.CTkFrame(parent_frame, fg_color="transparent")
             event_row.pack(fill="x", pady=4, padx=2)
 
-            lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", 11, "bold"), text_color="#3498db")
+            lbl_time = ctk.CTkLabel(event_row, text=string_tempo, font=("Roboto", 11, "bold"), text_color=time_color)
             lbl_time.pack(side="left", padx=8, pady=5)
 
-            lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", 12), text_color="white", anchor="w")
+            lbl_title = ctk.CTkLabel(event_row, text=titulo, font=("Roboto", 12), text_color=title_color, anchor="w")
             lbl_title.pack(side="left", fill="x", expand=True, padx=4, pady=5)
 
     def destroy_widget(self, wid):
