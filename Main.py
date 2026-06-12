@@ -40,14 +40,14 @@ except (ImportError, RuntimeError):
 # --- CONFIGURAÇÃO GOOGLE CALENDAR ---
 GOOGLE_CLIENT_ID = "555974802803-4na1f4nbj856kmqkfc2hv5808fc17kmk.apps.googleusercontent.com"
 
-# 1. CORREÇÃO DE SEGURANÇA: Ler o Secret de um ficheiro local
+# CORREÇÃO DE SEGURANÇA: Ler o Secret de um ficheiro local
 def load_client_secret():
     try:
         with open('client_secret.txt', 'r') as f:
             return f.read().strip()
     except Exception as e:
         print("❌ ERRO: Ficheiro 'client_secret.txt' não encontrado!")
-        print("Por favor, crie este ficheiro ao lado do Main.py e cole lá o seu Segredo do Cliente do Google.")
+        print("Por favor, crie este ficheiro ao lado do Main.py e cole lá o seu Segredo do Cliente.")
         sys.exit(1)
 
 GOOGLE_CLIENT_SECRET = load_client_secret()
@@ -75,7 +75,6 @@ class VitraeDashboard:
         self.device_id = None
         self.alert_active = False
 
-        # --- VARIÁVEIS DE ESTADO DA INTERFACE ---
         self.tela_ativa = True
         self.override_manual = False
         self.ser_radar = None
@@ -83,7 +82,7 @@ class VitraeDashboard:
 
         self.active_widgets = {}
         self.current_layout_data = {} 
-        self.layout_watch = None # Referência para o listener
+        self.layout_watch = None 
 
         print("🔄 A Iniciar Sistema VitraeView...")
         self.setup_firebase()
@@ -233,7 +232,6 @@ class VitraeDashboard:
             self.screen_height = height
             self.report_resolution_to_firebase()
 
-    # 2. CORREÇÃO DE ESTABILIDADE: Listener Blindado com Auto-Restart
     def start_layout_listener(self):
         doc_ref = self.db.collection('windows').document(self.device_id)
         
@@ -313,7 +311,7 @@ class VitraeDashboard:
             widget_info.update({
                 'frame': frame, 
                 'events_frame': events_frame,
-                'events': [], # Já não lemos da Firebase
+                'events': [],
                 'google_auth_code': w_data.get('google_auth_code')
             })
             self._render_calendar_events(events_frame, [])
@@ -347,7 +345,9 @@ class VitraeDashboard:
                 
         elif w_type == 'calendar':
             if 'google_auth_code' in w_data:
+                # SE RECEBER UM CÓDIGO NOVO DA APP, FORÇA ATUALIZAÇÃO IMEDIATA
                 w['google_auth_code'] = w_data['google_auth_code']
+                self.fetch_calendar_thread(wid)
 
     # ==========================================
     # MOTOR AUTÓNOMO DO GOOGLE CALENDAR
@@ -361,49 +361,50 @@ class VitraeDashboard:
         if not w: return
 
         refresh_token = self._load_refresh_token()
+        auth_code = w.get('google_auth_code')
 
-        if not refresh_token:
-            auth_code = w.get('google_auth_code')
-            if auth_code:
-                print("🔑 Novo código recebido da App! A trocar por Refresh Token...")
-                refresh_token = self._exchange_code_for_token(auth_code)
-                if refresh_token:
-                    self._save_refresh_token(refresh_token)
-                    print("✅ Refresh Token guardado com sucesso no dispositivo!")
-                    # 3. CORREÇÃO DE ESTABILIDADE: Escrita protegida
-                    if self.db:
-                        try:
-                            self.db.collection('windows').document(self.device_id).update({
-                                f'widgets.{wid}.google_auth_code': firestore.DELETE_FIELD
-                            })
-                        except Exception as e:
-                            print(f"⚠️ Erro ao apagar auth_code: {e}")
-                    w.pop('google_auth_code', None)
-                else:
-                    print("❌ Erro ao trocar o código. O utilizador pode ter de repetir a sincronização.")
+        # 1. SE TEM CÓDIGO NOVO (Vindo do botão "Forçar Sincronizar" da app), PRIORIZA-O
+        if auth_code:
+            print("🔑 Novo código recebido da App! A trocar por Refresh Token...")
+            novo_refresh_token = self._exchange_code_for_token(auth_code)
+            if novo_refresh_token:
+                self._save_refresh_token(novo_refresh_token)
+                refresh_token = novo_refresh_token # Atualiza a variável para usar já a seguir
+                print("✅ Novo Refresh Token guardado com sucesso!")
+                if self.db:
+                    try:
+                        self.db.collection('windows').document(self.device_id).update({
+                            f'widgets.{wid}.google_auth_code': firestore.DELETE_FIELD
+                        })
+                    except Exception as e:
+                        print(f"⚠️ Erro ao apagar auth_code da firebase: {e}")
             else:
-                self._agendar_proxima_verificacao(wid, w, 10000)
-                return
+                print("❌ Erro ao trocar o código. O código pode já ter sido usado.")
+            w.pop('google_auth_code', None) # Limpa da memória local
 
-        # --- SE TEMOS REFRESH TOKEN, BUSCAMOS AS TAREFAS ---
-        if refresh_token:
-            try:
-                access_token = self._get_access_token(refresh_token)
-                if access_token:
-                    now = datetime.utcnow()
-                    next_week = now + timedelta(days=7)
-                    now_str = now.isoformat() + 'Z'
-                    next_week_str = next_week.isoformat() + 'Z'
-                    
-                    url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={next_week_str}&singleEvents=true&orderBy=startTime"
-                    headers = {'Authorization': f'Bearer {access_token}'}
-                    # 4. CORREÇÃO DE ESTABILIDADE: Timeouts em todos os requests
-                    res = requests.get(url, headers=headers, timeout=10).json()
+        # 2. SE NÃO TEM TOKEN DE TODO, AGUARDA.
+        if not refresh_token:
+            self._agendar_proxima_verificacao(wid, w, 10000)
+            return
 
+        # 3. SE TEMOS REFRESH TOKEN, BUSCAMOS AS TAREFAS
+        try:
+            access_token = self._get_access_token(refresh_token)
+            if access_token:
+                now = datetime.utcnow()
+                next_week = now + timedelta(days=7)
+                now_str = now.isoformat() + 'Z'
+                next_week_str = next_week.isoformat() + 'Z'
+                
+                url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now_str}&timeMax={next_week_str}&singleEvents=true&orderBy=startTime"
+                headers = {'Authorization': f'Bearer {access_token}'}
+                res = requests.get(url, headers=headers, timeout=10)
+                
+                if res.status_code == 200:
+                    dados = res.json()
                     events_list = []
-                    for item in res.get('items', []):
+                    for item in dados.get('items', []):
                         start_str = item['start'].get('dateTime', item['start'].get('date'))
-                        
                         if 'T' in start_str:
                             data_part = start_str.split('T')[0].split('-')
                             hora = start_str.split('T')[1][:5]
@@ -412,17 +413,24 @@ class VitraeDashboard:
                             data_part = start_str.split('-')
                             dia = f"{data_part[2]}/{data_part[1]}"
                             hora = "Dia todo"
-
                         events_list.append({"day": dia, "time": hora, "title": item.get('summary', 'Sem Título')})
 
-                    # 5. OTIMIZAÇÃO: Apenas guarda em RAM e desenha no ecrã. Já não escreve na Firebase!
+                    # OTIMIZAÇÃO: Apenas guarda em RAM e desenha no ecrã.
                     if events_list != w.get('events'):
                         w['events'] = events_list
                         self.root.after(0, lambda: self._render_calendar_events(w['events_frame'], events_list))
-            except Exception as e:
-                print(f"⚠️ Erro no Google Calendar: {e}")
+                else:
+                    print(f"⚠️ Erro API Calendar ({res.status_code}): {res.text}")
+            else:
+                # SE O TOKEN DE ACESSO FALHOU, O REFRESH TOKEN FOI REVOGADO/É ZOMBIE. VAMOS APAGÁ-LO.
+                print("⚠️ Token de Acesso falhou. O Refresh Token expirou ou a chave mudou. A apagar ficheiro...")
+                if os.path.exists('calendar_token.txt'):
+                    os.remove('calendar_token.txt')
+                
+        except Exception as e:
+            print(f"⚠️ Erro crítico no Google Calendar: {e}")
 
-        # O RELÓGIO DA JANELA: Repete a extração daqui a 1 MINUTO (60000 ms) para testes
+        # O RELÓGIO DA JANELA: Repete a extração daqui a 1 MINUTO (60000 ms)
         self._agendar_proxima_verificacao(wid, w, 60000)
 
     def _agendar_proxima_verificacao(self, wid, w, delay_ms):
@@ -443,7 +451,7 @@ class VitraeDashboard:
             'redirect_uri': '' 
         }
         try:
-            res = requests.post(url, data=payload, timeout=10).json() # Timeout adicionado
+            res = requests.post(url, data=payload, timeout=10).json()
             return res.get('refresh_token')
         except:
             return None
@@ -457,7 +465,7 @@ class VitraeDashboard:
             'grant_type': 'refresh_token'
         }
         try:
-            res = requests.post(url, data=payload, timeout=10).json() # Timeout adicionado
+            res = requests.post(url, data=payload, timeout=10).json()
             return res.get('access_token')
         except:
             return None
@@ -553,14 +561,14 @@ class VitraeDashboard:
         try:
             geo_url = f"https://nominatim.openstreetmap.org/search?q={location}&format=json&limit=1"
             headers = {'User-Agent': 'VitraeView-SmartWindow'}
-            geo_res = requests.get(geo_url, headers=headers, timeout=10).json() # Timeout adicionado
+            geo_res = requests.get(geo_url, headers=headers, timeout=10).json() 
             
             if geo_res:
                 lat = geo_res[0]['lat']
                 lon = geo_res[0]['lon']
                 
                 meteo_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-                meteo_res = requests.get(meteo_url, timeout=10).json() # Timeout adicionado
+                meteo_res = requests.get(meteo_url, timeout=10).json() 
                 temp = meteo_res['current_weather']['temperature']
                 
                 self.root.after(0, lambda: w['lbl_main'].configure(text=f"{temp}°C"))
