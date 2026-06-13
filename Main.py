@@ -271,6 +271,35 @@ class VitraeDashboard:
             else:
                 self.update_dynamic_widget(wid, w_data)
 
+    def _posicionar_frame(self, wid, x, y):
+        """Posiciona o frame travando-o dentro das bordas reais da janela."""
+        w = self.active_widgets.get(wid)
+        if not w:
+            return
+
+        frame = w['frame']
+        # MARGEM 0: O widget vai bater exatamentee na borda física do monitor!
+        MARGIN = 0 
+
+        win_w = self.root.winfo_width()
+        win_h = self.root.winfo_height()
+        if win_w < 100: win_w = self.screen_width
+        if win_h < 100: win_h = self.screen_height
+
+        frame.update_idletasks()
+        fw = frame.winfo_reqwidth()
+        fh = frame.winfo_reqheight()
+
+        min_x = MARGIN / win_w
+        min_y = MARGIN / win_h
+        max_x = max(min_x, 1.0 - ((fw + MARGIN) / win_w))
+        max_y = max(min_y, 1.0 - ((fh + MARGIN) / win_h))
+
+        final_x = min(max(x, min_x), max_x)
+        final_y = min(max(y, min_y), max_y)
+
+        frame.place(relx=final_x, rely=final_y, anchor="nw")
+
     def create_dynamic_widget(self, wid, w_data):
         w_type = w_data.get('type')
         x = w_data.get('x', 0.5)
@@ -299,7 +328,14 @@ class VitraeDashboard:
             lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", int(14 * scale)), text_color="#e0e0e0")
             lbl_sub.place(relx=0.5, rely=0.75, anchor="center")
 
-            widget_info.update({'frame': frame, 'lbl_main': lbl_main, 'lbl_sub': lbl_sub, 'loc': w_data.get('location', 'Lisboa, PT')})
+            widget_info.update({
+                'frame': frame, 
+                'lbl_main': lbl_main, 
+                'lbl_sub': lbl_sub, 
+                'loc': w_data.get('location', 'Lisboa, Portugal'),
+                'lat': w_data.get('lat', '38.7071'),
+                'lon': w_data.get('lon', '-9.1355')
+            })
 
         elif w_type == 'gas':
             w_w, w_h = 220, 80
@@ -344,21 +380,9 @@ class VitraeDashboard:
             return
 
         self.active_widgets[wid] = widget_info
-        
-        # --- LÊ A LARGURA REAL DA JANELA NESTE EXATO MILISSEGUNDO ---
-        win_w = self.root.winfo_width()
-        win_h = self.root.winfo_height()
-        # Prevenção caso o ecrã ainda não tenha acabado de desenhar
-        if win_w < 100: win_w = self.screen_width
-        if win_h < 100: win_h = self.screen_height
-        
-        max_x = max(0.0, 1.0 - ((w_w * scale) / win_w))
-        max_y = max(0.0, 1.0 - ((w_h * scale) / win_h))
-        
-        final_x = min(max(x, 0.0), max_x)
-        final_y = min(max(y, 0.0), max_y)
-        
-        self.active_widgets[wid]['frame'].place(relx=final_x, rely=final_y, anchor="nw")
+
+        # Posiciona com a regra única de clamp (mede o tamanho real do frame)
+        self._posicionar_frame(wid, x, y)
 
         if w_type == 'clock':
             self.tick_clock(wid)
@@ -367,10 +391,14 @@ class VitraeDashboard:
         elif w_type == 'calendar':
             self.fetch_calendar_thread(wid)
 
+            
+
     def update_dynamic_widget(self, wid, w_data):
         w = self.active_widgets[wid]
         w_type = w['type']
-        
+
+        novo_x = w_data.get('x', 0.5)
+        novo_y = w_data.get('y', 0.5)
         novo_scale = w_data.get('scale', 1.0)
         old_scale = w.get('scale', 1.0)
         
@@ -402,9 +430,14 @@ class VitraeDashboard:
         if w_type == 'clock':
             w['tz'] = w_data.get('timezone', 'Local')
         elif w_type == 'weather':
-            new_loc = w_data.get('location', 'Lisboa, PT')
-            if w['loc'] != new_loc:
+            new_loc = w_data.get('location', 'Lisboa, Portugal')
+            new_lat = str(w_data.get('lat', '38.7071'))
+            new_lon = str(w_data.get('lon', '-9.1355'))
+            
+            if w.get('loc') != new_loc or w.get('lat') != new_lat:
                 w['loc'] = new_loc
+                w['lat'] = new_lat
+                w['lon'] = new_lon
                 w['lbl_main'].configure(text="--°C")
                 self.fetch_weather_thread(wid)
                 
@@ -423,7 +456,7 @@ class VitraeDashboard:
                 w['frame'].configure(fg_color=novo_bg)
             
             if w.get('title_color') != novo_title or w.get('time_color') != novo_time or w.get('view_mode') != novo_view:
-                old_view = w.get('view_mode') # Guarda o modo antigo
+                old_view = w.get('view_mode')
                 
                 w['title_color'] = novo_title
                 w['time_color'] = novo_time
@@ -435,26 +468,12 @@ class VitraeDashboard:
                 w['lbl_title'].configure(text=texto_titulo, text_color=novo_title)
                 self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time, novo_scale)
 
-                # --- A MAGIA: Se mudares o filtro na App, ele vai imediatamente à Google buscar os novos dados! ---
                 if old_view != novo_view:
                     self.fetch_calendar_thread(wid)
-                
-                w['lbl_title'].configure(text=texto_titulo, text_color=novo_title)
-                self._render_calendar_events(w['events_frame'], w.get('events', []), novo_title, novo_time, novo_scale)
-        
-        # --- POSICIONAMENTO COM BLINDAGEM PERFEITA ---
-        win_w = self.root.winfo_width()
-        win_h = self.root.winfo_height()
-        if win_w < 100: win_w = self.screen_width
-        if win_h < 100: win_h = self.screen_height
 
-        max_x = max(0.0, 1.0 - ((w_w * novo_scale) / win_w))
-        max_y = max(0.0, 1.0 - ((w_h * novo_scale) / win_h))
-        
-        final_x = min(max(w_data.get('x', 0.5), 0.0), max_x)
-        final_y = min(max(w_data.get('y', 0.5), 0.0), max_y)
-        
-        w['frame'].place(relx=final_x, rely=final_y, anchor="nw")
+        # --- POSICIONAMENTO BLINDADO ---
+        # A chamada à posição agora acontece no fim, quando o Python já sabe a largura final com as escalas aplicadas!
+        self._posicionar_frame(wid, novo_x, novo_y)
 
     # ==========================================
     # MOTOR AUTÓNOMO DO GOOGLE CALENDAR
@@ -617,7 +636,6 @@ class VitraeDashboard:
         for widget in parent_frame.winfo_children():
             widget.destroy()
 
-        # Calcula o tamanho da letra com base na escala (int para evitar erros do Tkinter)
         font_empty = int(13 * scale)
         font_time = int(11 * scale)
         font_event = int(12 * scale)
@@ -632,6 +650,10 @@ class VitraeDashboard:
             hora = event.get('time', '--:--')
             dia = event.get('day', '')  
             titulo = event.get('title', 'Sem Título')
+
+            # MAGIA: Se o texto for demasiado longo (mais de 22 letras), cortamos para não partir as margens da janela!
+            if len(titulo) > 22:
+                titulo = titulo[:19] + "..."
 
             string_tempo = f"{dia} {hora}".strip() if dia else hora
 
@@ -685,29 +707,23 @@ class VitraeDashboard:
         w = self.active_widgets.get(wid)
         if not w: return
 
-        location = w.get('loc', 'Lisboa')
+        location = w.get('loc', 'Lisboa, Portugal')
+        lat = w.get('lat', '38.7071')
+        lon = w.get('lon', '-9.1355')
         
         try:
-            geo_url = f"https://nominatim.openstreetmap.org/search?q={location}&format=json&limit=1"
-            headers = {'User-Agent': 'VitraeView-SmartWindow'}
-            geo_res = requests.get(geo_url, headers=headers, timeout=10).json() 
+            # MAGIA: O Python agora usa as coordenadas que a App descobriu e vai direto à meteorologia!
+            meteo_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+            meteo_res = requests.get(meteo_url, timeout=10).json() 
+            temp = meteo_res['current_weather']['temperature']
             
-            if geo_res:
-                lat = geo_res[0]['lat']
-                lon = geo_res[0]['lon']
-                
-                meteo_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-                meteo_res = requests.get(meteo_url, timeout=10).json() 
-                temp = meteo_res['current_weather']['temperature']
-                
-                self.root.after(0, lambda: w['lbl_main'].configure(text=f"{temp}°C"))
-                self.root.after(0, lambda: w['lbl_sub'].configure(text=location))
-            else:
-                self.root.after(0, lambda: w['lbl_main'].configure(text="? °C"))
-                self.root.after(0, lambda: w['lbl_sub'].configure(text="Local Inválido"))
+            self.root.after(0, lambda: w['lbl_main'].configure(text=f"{temp}°C"))
+            self.root.after(0, lambda: w['lbl_sub'].configure(text=location))
         except Exception as e:
-            pass
+            self.root.after(0, lambda: w['lbl_main'].configure(text="? °C"))
+            self.root.after(0, lambda: w['lbl_sub'].configure(text="Erro API"))
 
+        # Atualiza o tempo a cada 15 minutos
         if wid in self.active_widgets:
              self.active_widgets[wid]['update_job'] = self.root.after(900000, lambda id=wid: self.fetch_weather_thread(id))
 
