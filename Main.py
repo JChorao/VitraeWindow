@@ -317,7 +317,9 @@ class VitraeDashboard:
             lbl_sub = ctk.CTkLabel(frame, text="", font=("Roboto", int(14 * scale)), text_color="gray")
             lbl_sub.place(relx=0.5, rely=0.75, anchor="center")
             
-            widget_info.update({'frame': frame, 'lbl_main': lbl_main, 'lbl_sub': lbl_sub, 'tz': w_data.get('timezone', 'Local')})
+            widget_info.update({'frame': frame, 'lbl_main': lbl_main, 'lbl_sub': lbl_sub, 
+                                'tz': w_data.get('timezone', 'Local'), 
+                                'tz_name': w_data.get('tz_name', '')})
 
         elif w_type == 'weather':
             w_w, w_h = 200, 120
@@ -429,6 +431,7 @@ class VitraeDashboard:
         # --- ATUALIZA AS RESTANTES DEFINIÇÕES ---
         if w_type == 'clock':
             w['tz'] = w_data.get('timezone', 'Local')
+            w['tz_name'] = w_data.get('tz_name', '')
         elif w_type == 'weather':
             new_loc = w_data.get('location', 'Lisboa, Portugal')
             new_lat = str(w_data.get('lat', '38.7071'))
@@ -689,7 +692,10 @@ class VitraeDashboard:
             try:
                 tz = pytz.timezone(tz_string)
                 now = datetime.now(tz)
-                display_name = tz_string.split('/')[-1].replace('_', ' ')
+                # Tenta usar o nome em PT que a App mandou. Se não houver, usa o método antigo de salvaguarda.
+                display_name = w.get('tz_name')
+                if not display_name:
+                    display_name = tz_string.split('/')[-1].replace('_', ' ')
             except Exception as e:
                 now = datetime.now()
                 display_name = "Hora Local"
