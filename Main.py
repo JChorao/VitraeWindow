@@ -6,8 +6,13 @@ import os
 import sys
 import pytz
 import serial
+import base64
+
 import subprocess
 from datetime import datetime, timedelta
+
+from PIL import Image
+import io
 
 # --- IMPORTAÇÕES FIREBASE ---
 import firebase_admin
@@ -378,8 +383,34 @@ class VitraeDashboard:
                 'view_mode': view_mode
             })
             self._render_calendar_events(events_frame, [], title_color, time_color, scale)
+
+        elif w_type == 'photo':
+            w_w, w_h = 300, 300
+            image_urls = w_data.get('image_urls', [])
+            if not image_urls and w_data.get('image_url'):
+                image_urls = [w_data.get('image_url')]
+
+            frame = ctk.CTkFrame(self.root, fg_color="transparent", width=int(w_w * scale), height=int(w_h * scale))
+            frame.pack_propagate(False)
+
+            lbl_img = ctk.CTkLabel(frame, text="Sem Imagens" if not image_urls else "A carregar fotos...", text_color="gray")
+            lbl_img.pack(expand=True, fill="both")
+
+            widget_info.update({
+                'frame': frame, 
+                'lbl_img': lbl_img, 
+                'image_urls': image_urls,
+                'slide_interval': w_data.get('slide_interval', 10),
+                'current_slide_idx': 0,
+                'base_w': w_w,
+                'base_h': w_h,
+                'raw_images': [],
+                'slide_job': None
+            })
+            
         else:
             return
+        
 
         self.active_widgets[wid] = widget_info
 
@@ -392,6 +423,9 @@ class VitraeDashboard:
             self.fetch_weather_thread(wid)
         elif w_type == 'calendar':
             self.fetch_calendar_thread(wid)
+        elif w_type == 'photo':
+            if widget_info.get('image_urls'):
+                self.fetch_image_thread(wid, widget_info['image_urls'])
 
             
 
@@ -408,6 +442,9 @@ class VitraeDashboard:
         elif w_type == 'weather': w_w, w_h = 200, 120
         elif w_type == 'gas': w_w, w_h = 220, 80
         elif w_type == 'calendar': w_w, w_h = 310, 250
+        elif w_type == 'photo': # --- NOVO ---
+            w_w = w.get('base_w', 300)
+            w_h = w.get('base_h', 300)
         else: w_w, w_h = 200, 200
 
         # --- APLICA A ESCALA AOS TAMANHOS DE TODOS OS WIDGETS ---
@@ -432,6 +469,7 @@ class VitraeDashboard:
         if w_type == 'clock':
             w['tz'] = w_data.get('timezone', 'Local')
             w['tz_name'] = w_data.get('tz_name', '')
+
         elif w_type == 'weather':
             new_loc = w_data.get('location', 'Lisboa, Portugal')
             new_lat = str(w_data.get('lat', '38.7071'))
@@ -473,6 +511,35 @@ class VitraeDashboard:
 
                 if old_view != novo_view:
                     self.fetch_calendar_thread(wid)
+
+        elif w_type == 'photo':
+            new_urls = w_data.get('image_urls', [])
+            if not new_urls and w_data.get('image_url'):
+                new_urls = [w_data.get('image_url')]
+            new_interval = w_data.get('slide_interval', 10)
+            
+            # Se as Fotos mudaram (adicionou ou removeu)
+            if w.get('image_urls') != new_urls:
+                w['image_urls'] = new_urls
+                if new_urls:
+                    w['lbl_img'].configure(text="A carregar fotos...", image="")
+                    self.fetch_image_thread(wid, new_urls)
+                else:
+                    if w.get('slide_job'):
+                        self.root.after_cancel(w['slide_job'])
+                    w['lbl_img'].configure(text="Sem Imagem", image="")
+                    w['raw_images'] = []
+            
+            # Se o tempo mudou
+            elif w.get('slide_interval') != new_interval:
+                w['slide_interval'] = new_interval
+                if len(w.get('raw_images', [])) > 1:
+                    self._start_slideshow(wid) # Recomeça o relógio
+            
+            # Se mudou o tamanho (Zoom)
+            elif old_scale != novo_scale and w.get('raw_images'):
+                w['scale'] = novo_scale
+                self._show_current_slide(wid)
 
         # --- POSICIONAMENTO BLINDADO ---
         # A chamada à posição agora acontece no fim, quando o Python já sabe a largura final com as escalas aplicadas!
@@ -676,6 +743,8 @@ class VitraeDashboard:
                 self.root.after_cancel(w['update_job'])
             if w.get('update_job_calendar'):
                 self.root.after_cancel(w['update_job_calendar'])
+            if w.get('slide_job'):   # <--- ADICIONA ISTO
+                self.root.after_cancel(w['slide_job']) # <--- ADICIONA ISTO
             w['frame'].destroy()
             del self.active_widgets[wid]
 
@@ -732,6 +801,99 @@ class VitraeDashboard:
         # Atualiza o tempo a cada 15 minutos
         if wid in self.active_widgets:
              self.active_widgets[wid]['update_job'] = self.root.after(900000, lambda id=wid: self.fetch_weather_thread(id))
+
+
+   # ==========================================
+    # LÓGICA DO WIDGET DE FOTOGRAFIA / MENU
+    # ==========================================
+    def fetch_image_thread(self, wid, url):
+        threading.Thread(target=self._fetch_image_logic, args=(wid, url), daemon=True).start()
+
+    def fetch_image_thread(self, wid, urls):
+        if wid not in self.active_widgets: return
+        threading.Thread(target=self._fetch_image_logic, args=(wid, urls), daemon=True).start()
+
+    def _fetch_image_logic(self, wid, urls):
+        w = self.active_widgets.get(wid)
+        if not w: return
+        try:
+            loaded_images = []
+            # Descarrega todas as imagens da lista
+            for url in urls:
+                image_data = None
+                if url.startswith('data:image'):
+                    header, encoded = url.split(',', 1)
+                    image_data = Image.open(io.BytesIO(base64.b64decode(encoded)))
+                elif url.startswith('http'):
+                    res = requests.get(url, timeout=15)
+                    if res.status_code == 200:
+                        image_data = Image.open(io.BytesIO(res.content))
+                if image_data:
+                    loaded_images.append(image_data)
+            
+            if loaded_images:
+                w['raw_images'] = loaded_images
+                w['current_slide_idx'] = 0
+                self.root.after(0, lambda: self._start_slideshow(wid))
+            else:
+                self.root.after(0, lambda: w['lbl_img'].configure(text="Erro a ler imagens", image=""))
+        except Exception as e:
+            print(f"❌ Erro ao processar imagens: {e}")
+            self.root.after(0, lambda: w['lbl_img'].configure(text="Erro de Formato", image=""))
+
+    def _start_slideshow(self, wid):
+        w = self.active_widgets.get(wid)
+        if not w: return
+        
+        # Cancela temporizador anterior
+        if w.get('slide_job'):
+            self.root.after_cancel(w['slide_job'])
+            
+        self._show_current_slide(wid)
+        
+        # Se tiver mais que uma foto, começa a rodar!
+        if len(w['raw_images']) > 1:
+            interval_ms = w.get('slide_interval', 10) * 1000
+            w['slide_job'] = self.root.after(interval_ms, lambda: self._next_slide(wid))
+
+    def _show_current_slide(self, wid):
+        w = self.active_widgets.get(wid)
+        if not w or not w.get('raw_images'): return
+        
+        idx = w['current_slide_idx']
+        if idx >= len(w['raw_images']):
+            idx = 0
+            w['current_slide_idx'] = 0
+            
+        image_data = w['raw_images'][idx]
+        
+        raw_w, raw_h = image_data.size
+        aspect = raw_h / raw_w
+        base_w = 300
+        base_h = int(300 * aspect)
+        w['base_w'] = base_w
+        w['base_h'] = base_h
+        
+        current_scale = w.get('scale', 1.0)
+        final_w = int(base_w * current_scale)
+        final_h = int(base_h * current_scale)
+        
+        ctk_img = ctk.CTkImage(light_image=image_data, dark_image=image_data, size=(final_w, final_h))
+        w['frame'].configure(width=final_w, height=final_h)
+        w['lbl_img'].configure(image=ctk_img, text="")
+
+    def _next_slide(self, wid):
+        w = self.active_widgets.get(wid)
+        if not w or not w.get('raw_images'): return
+        
+        w['current_slide_idx'] += 1
+        if w['current_slide_idx'] >= len(w['raw_images']):
+            w['current_slide_idx'] = 0
+            
+        self._show_current_slide(wid)
+        
+        interval_ms = w.get('slide_interval', 10) * 1000
+        w['slide_job'] = self.root.after(interval_ms, lambda: self._next_slide(wid))
 
     def check_gas_sensor(self):
         sensor_value = GPIO.input(GAS_SENSOR_PIN)
