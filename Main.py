@@ -11,7 +11,7 @@ import base64
 import subprocess
 from datetime import datetime, timedelta
 
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 
 # --- IMPORTAÇÕES FIREBASE ---
@@ -401,6 +401,7 @@ class VitraeDashboard:
                 'lbl_img': lbl_img, 
                 'image_urls': image_urls,
                 'slide_interval': w_data.get('slide_interval', 10),
+                'rotation_turns': w_data.get('rotation_turns', 0), # <--- ADICIONAR ISTO
                 'current_slide_idx': 0,
                 'base_w': w_w,
                 'base_h': w_h,
@@ -517,6 +518,13 @@ class VitraeDashboard:
             if not new_urls and w_data.get('image_url'):
                 new_urls = [w_data.get('image_url')]
             new_interval = w_data.get('slide_interval', 10)
+            new_rotation = w_data.get('rotation_turns', 0) # <--- LÊ DA FIREBASE
+            
+            # --- NOVA LÓGICA: SE A ROTAÇÃO MUDOU ---
+            if w.get('rotation_turns', 0) != new_rotation:
+                w['rotation_turns'] = new_rotation
+                if w.get('raw_images'):
+                    self._show_current_slide(wid) # Força o redesenho imediato!
             
             # Se as Fotos mudaram (adicionou ou removeu)
             if w.get('image_urls') != new_urls:
@@ -534,7 +542,7 @@ class VitraeDashboard:
             elif w.get('slide_interval') != new_interval:
                 w['slide_interval'] = new_interval
                 if len(w.get('raw_images', [])) > 1:
-                    self._start_slideshow(wid) # Recomeça o relógio
+                    self._start_slideshow(wid)
             
             # Se mudou o tamanho (Zoom)
             elif old_scale != novo_scale and w.get('raw_images'):
@@ -828,7 +836,13 @@ class VitraeDashboard:
                     res = requests.get(url, timeout=15)
                     if res.status_code == 200:
                         image_data = Image.open(io.BytesIO(res.content))
+                
                 if image_data:
+                    # --- CORREÇÃO DO EXIF AQUI ---
+                    # Isto lê a etiqueta invisível do telemóvel e endireita a foto original
+                    # antes de aplicarmos as rotações manuais do botão!
+                    image_data = ImageOps.exif_transpose(image_data)
+                    
                     loaded_images.append(image_data)
             
             if loaded_images:
@@ -867,6 +881,14 @@ class VitraeDashboard:
             
         image_data = w['raw_images'][idx]
         
+        # --- APLICA A ROTAÇÃO AQUI ANTES DE CALCULAR O TAMANHO ---
+        turns = w.get('rotation_turns', 0)
+        if turns > 0:
+            # Multiplica por -90 para girar no sentido dos ponteiros do relógio, tal como o Flutter.
+            # expand=True altera a resolução para não cortar a imagem.
+            image_data = image_data.rotate(-90 * turns, expand=True)
+        # ---------------------------------------------------------
+
         raw_w, raw_h = image_data.size
         aspect = raw_h / raw_w
         base_w = 300
